@@ -1,8 +1,8 @@
 """
-Copyright(c) 2017, Konrad Sobon
+Copyright(c) 2016, Konrad Sobon
 @arch_laboratory, http://archi-lab.net
 
-Copyright (c) 2017, David Mans
+Copyright (c) 2016, David Mans
 http://neoarchaic.net
 
 Excel and Dynamo interop library
@@ -10,12 +10,16 @@ Excel and Dynamo interop library
 """
 import clr
 import sys
+sys.path.append(r"C:\Program Files\Dynamo\Dynamo Core\1.0")
+clr.AddReference('ProtoGeometry')
+
 pyt_path = r'C:\Program Files (x86)\IronPython 2.7\Lib'
 sys.path.append(pyt_path)
 
 import System
 from System import Array
 from System.Collections.Generic import *
+import Autodesk.DesignScript as ds
 
 clr.AddReferenceByName('Microsoft.Office.Interop.Excel, Version=11.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c')
 from Microsoft.Office.Interop import Excel
@@ -348,14 +352,6 @@ class BBLineGraphStyle(object):
         self.lineStyle = lineStyle
         self.markerStyle = markerStyle
 
-class BBImageStyle(object):
-    def __init__(self, name=None, width=100, height=100, linkToFile=False, saveWithDoc=True):
-        self.name = name
-        self.width = width
-        self.height = height
-        self.linkToFile = linkToFile
-        self.saveWithDoc = saveWithDoc
-
 """ Conditional Formatting Classes """
 
 class BBCellValueFormatCondition(object):
@@ -646,22 +642,6 @@ class BBData(object):
             return None
         else:
             return self.data
-
-class BBImage(object):
-
-    def __init__(self, sheetName=None, origin=None, imagePath=None):
-        self.sheetName = sheetName
-        self.origin = origin
-        self.imagePath = imagePath
-    def SheetName(self):
-        return self.sheetName
-    def Origin(self):
-        if self.origin == None:
-            return None
-        else:
-            return CellIndex(self.origin)
-    def ImagePath(self):
-        return self.imagePath
 
 class BBStyle(object):
 

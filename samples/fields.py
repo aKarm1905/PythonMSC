@@ -1,178 +1,368 @@
-from __future__ import absolute_import
-import email.utils
-import mimetypes
-
-from .packages import six
-
-
-def guess_content_type(filename, default='application/octet-stream'):
-    """
-    Guess the "Content-Type" of a file.
-
-    :param filename:
-        The filename to guess the "Content-Type" of using :mod:`mimetypes`.
-    :param default:
-        If no "Content-Type" can be guessed, default to `default`.
-    """
-    if filename:
-        return mimetypes.guess_type(filename)[0] or default
-    return default
+# coding=utf-8
+"""OpenFOAM field values."""
+from collections import OrderedDict
+from copy import deepcopy
 
 
-def format_header_param(name, value):
-    """
-    Helper function to format and quote a single header parameter.
+class Field(object):
+    """OpenFOAM field values base class."""
 
-    Particularly useful for header parameters which might contain
-    non-ASCII values, like file names. This follows RFC 2231, as
-    suggested by RFC 2388 Section 4.4.
-
-    :param name:
-        The name of the parameter, a string expected to be ASCII only.
-    :param value:
-        The value of the parameter, provided as a unicode string.
-    """
-    if not any(ch in value for ch in '"\\\r\n'):
-        result = '%s="%s"' % (name, value)
-        try:
-            result.encode('ascii')
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            pass
-        else:
-            return result
-    if not six.PY3 and isinstance(value, six.text_type):  # Python 2:
-        value = value.encode('utf-8')
-    value = email.utils.encode_rfc2231(value, 'utf-8')
-    value = '%s*=%s' % (name, value)
-    return value
-
-
-class RequestField(object):
-    """
-    A data container for request body parameters.
-
-    :param name:
-        The name of this request field.
-    :param data:
-        The data/value body.
-    :param filename:
-        An optional filename of the request field.
-    :param headers:
-        An optional dict-like object of headers to initially use for the field.
-    """
-    def __init__(self, name, data, filename=None, headers=None):
-        self._name = name
-        self._filename = filename
-        self.data = data
-        self.headers = {}
-        if headers:
-            self.headers = dict(headers)
+    def __init__(self):
+        """Init class."""
+        self.type = self.__class__.__name__[:1].lower() + \
+            self.__class__.__name__[1:]
+        self.__values = {}
+        self.__values['type'] = self.type
 
     @classmethod
-    def from_tuples(cls, fieldname, value):
-        """
-        A :class:`~urllib3.fields.RequestField` factory from old-style tuple parameters.
+    def fromDict(cls, d):
+        """Create a field from a dictionary."""
+        _cls = cls()
+        assert isinstance(d, (OrderedDict, dict)), \
+            ValueError('Input should be a dictionary not {}'.format(type(d)))
+        assert 'type' in d, ValueError('"type" is missing from {}'.format(d))
+        _cls.__values = d
+        return _cls
 
-        Supports constructing :class:`~urllib3.fields.RequestField` from
-        parameter of key/value strings AND key/filetuple. A filetuple is a
-        (filename, data, MIME type) tuple where the MIME type is optional.
-        For example::
+    @classmethod
+    def fromString(cls, st):
+        """Create a field from a string."""
+        d = {s.split()[0]: ' '.join(s.split()[1:])
+             for s in st.replace('{', '').replace('}', '').split(';')
+             if s.strip()}
+        return cls.fromDict(d)
 
-            'foo': 'bar',
-            'fakefile': ('foofile.txt', 'contents of foofile'),
-            'realfile': ('barfile.txt', open('realfile').read()),
-            'typedfile': ('bazfile.bin', open('bazfile').read(), 'image/jpeg'),
-            'nonamefile': 'contents of nonamefile field',
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        return self.__values
 
-        Field names and filenames must be unicode.
-        """
-        if isinstance(value, tuple):
-            if len(value) == 3:
-                filename, data, content_type = value
-            else:
-                filename, data = value
-                content_type = guess_content_type(filename)
+    def duplicate(self):
+        """Return a copy of this object."""
+        return deepcopy(self)
+
+    def ToString(self):
+        """Overwrite .NET ToString method."""
+        return self.__repr__()
+
+    def __repr__(self):
+        """Representation."""
+        return "\n".join(("{}        {};").format(key, value)
+                         for key, value in self.valueDict.iteritems())
+
+
+class ZeroGradient(Field):
+    """ZeroGradient boundary condition."""
+
+    pass
+
+
+class Slip(Field):
+    """Slip boundary condition."""
+
+    pass
+
+
+class Empty(Field):
+    """Empty boundary condition."""
+
+    pass
+
+
+class Calculated(Field):
+    """OpenFOAM calculated value.
+
+    Args:
+        value: value.
+        isUnifrom: A boolean that indicates if the values is uniform.
+    """
+
+    def __init__(self, value=None, isUnifrom=True):
+        """Init Calculated class."""
+        Field.__init__(self)
+        if value:
+            self.value = 'uniform {}'.format(str(value)) if isUnifrom else str(value)
         else:
-            filename = None
-            content_type = None
-            data = value
+            self.value = None
 
-        request_param = cls(fieldname, data, filename=filename)
-        request_param.make_multipart(content_type=content_type)
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        _d = OrderedDict()
+        if self.value:
+            _d['type'] = self.type
+            _d['value'] = self.value
+        else:
+            _d['type'] = self.type
 
-        return request_param
+        return _d
 
-    def _render_part(self, name, value):
+
+class InletOutlet(Field):
+    """OpenFOAM InletOutlet value.
+
+    http://www.cfd-online.com/Forums/openfoam-solving/60337-questions-about
+    -inletoutlet-outletinlet-boundary-conditions.html
+    """
+
+    def __init__(self, inletValue, value):
+        """Init class."""
+        Field.__init__(self)
+        self.inletValue = inletValue
+        self.value = value
+
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        _d = OrderedDict()
+        _d['type'] = self.type
+        _d['inletValue'] = self.inletValue
+        _d['value'] = self.value
+        return _d
+
+
+class OutletInlet(Field):
+    """OpenFOAM OutletInlet value.
+
+    http://www.cfd-online.com/Forums/openfoam-solving/60337-questions-about
+    -inletoutlet-outletinlet-boundary-conditions.html
+    """
+
+    def __init__(self, outletValue, value):
+        """Init class."""
+        Field.__init__(self)
+        self.outletValue = outletValue
+        self.value = value
+
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        _d = OrderedDict()
+        _d['type'] = self.type
+        _d['outletValue'] = self.outletValue
+        _d['value'] = self.value
+        return _d
+
+
+class AtmBoundary(Field):
+    """OpenFOAM AtmBoundaryLayerInletVelocity.
+
+    Attributes:
+        Uref: Flow velocity as a float number.
+        Zref: Reference z value for flow velocity as a float number.
+        z0: Roughness (e.g. uniform 1).
+        flowDir: Velocity vector as a tuple.
+        zDir: Z direction (default:(0 0 1)).
+        zGround: Min z value of the bounding box (default: 0).
+        fromValues: True.
+    """
+
+    def __init__(self, Uref, Zref, z0, flowDir, zDir='(0 0 1)', zGround=0,
+                 fromValues=True):
+        """Create from values.
+
+        Args:
+            Uref: Flow velocity as a float number.
+            Zref: Reference z value for flow velocity as a float number.
+            z0: Roughness (e.g. uniform 1).
+            flowDir: Velocity vector as a tuple.
+            zDir: Z direction (default:(0 0 1)).
+            zGround: Min z value of the bounding box (default: 0).
         """
-        Overridable helper function to format a single header parameter.
+        self.fromValues = fromValues
+        Field.__init__(self)
+        self.Uref = Uref
+        self.Zref = Zref
+        self.z0 = z0
+        self.flowDir = flowDir
+        self.zDir = zDir
+        self.zGround = zGround
 
-        :param name:
-            The name of the parameter, a string expected to be ASCII only.
-        :param value:
-            The value of the parameter, provided as a unicode string.
-        """
-        return format_header_param(name, value)
+    @classmethod
+    def fromABLConditions(cls, ablConditions, value=None):
+        """Init class from a condition file."""
+        _cls = cls(ablConditions.values['Uref'], ablConditions.values['Zref'],
+                   ablConditions.values['z0'], ablConditions.values['flowDir'],
+                   ablConditions.values['zDir'], ablConditions.values['zGround'],
+                   fromValues=False)
+        _cls.value = value
+        _cls.ABLConditions = ablConditions
+        return _cls
 
-    def _render_parts(self, header_parts):
-        """
-        Helper function to format and quote a single header.
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        _d = OrderedDict()
+        _d['type'] = self.type
+        if not self.fromValues:
+            _d['#include'] = '"{}"'.format(self.ABLConditions.__class__.__name__)
+            if self.value:
+                _d['value'] = str(self.value)
 
-        Useful for single headers that are composed of multiple items. E.g.,
-        'Content-Disposition' fields.
+        else:
+            _d['Uref'] = self.Uref
+            _d['Zref'] = self.Zref
+            _d['z0'] = self.z0
+            _d['flowDir'] = self.flowDir
+            _d['zDir'] = self.zDir
+            _d['zGround'] = self.zGround
 
-        :param header_parts:
-            A sequence of (k, v) typles or a :class:`dict` of (k, v) to format
-            as `k1="v1"; k2="v2"; ...`.
-        """
-        parts = []
-        iterable = header_parts
-        if isinstance(header_parts, dict):
-            iterable = header_parts.items()
+        return _d
 
-        for name, value in iterable:
-            if value is not None:
-                parts.append(self._render_part(name, value))
 
-        return '; '.join(parts)
+class AtmBoundaryLayerInletVelocity(AtmBoundary):
+    """AtmBoundaryLayerInletVelocity."""
 
-    def render_headers(self):
-        """
-        Renders the headers for this request field.
-        """
-        lines = []
+    pass
 
-        sort_keys = ['Content-Disposition', 'Content-Type', 'Content-Location']
-        for sort_key in sort_keys:
-            if self.headers.get(sort_key, False):
-                lines.append('%s: %s' % (sort_key, self.headers[sort_key]))
 
-        for header_name, header_value in self.headers.items():
-            if header_name not in sort_keys:
-                if header_value:
-                    lines.append('%s: %s' % (header_name, header_value))
+class AtmBoundaryLayerInletK(AtmBoundary):
+    """AtmBoundaryLayerInletK."""
 
-        lines.append('\r\n')
-        return '\r\n'.join(lines)
+    pass
 
-    def make_multipart(self, content_disposition=None, content_type=None,
-                       content_location=None):
-        """
-        Makes this request field into a multipart request field.
 
-        This method overrides "Content-Disposition", "Content-Type" and
-        "Content-Location" headers to the request parameter.
+class AtmBoundaryLayerInletEpsilon(AtmBoundary):
+    """AtmBoundaryLayerInletEpsilon."""
 
-        :param content_type:
-            The 'Content-Type' of the request body.
-        :param content_location:
-            The 'Content-Location' of the request body.
+    pass
 
-        """
-        self.headers['Content-Disposition'] = content_disposition or 'form-data'
-        self.headers['Content-Disposition'] += '; '.join([
-            '', self._render_parts(
-                (('name', self._name), ('filename', self._filename))
-            )
-        ])
-        self.headers['Content-Type'] = content_type
-        self.headers['Content-Location'] = content_location
+
+class NutkAtmRoughWallFunction(AtmBoundary):
+    """NutkAtmRoughWallFunction."""
+
+    pass
+
+
+class FixedValue(Field):
+    """OpenFOAM fixed value.
+
+    Args:
+        value: value.
+        isUnifrom: A boolean that indicates if the values is uniform.
+    """
+
+    def __init__(self, value, isUnifrom=True):
+        """Init the class."""
+        Field.__init__(self)
+        self.value = 'uniform {}'.format(str(value)) if isUnifrom else str(value)
+
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        _d = OrderedDict()
+        _d['type'] = self.type
+        _d['value'] = self.value
+        return _d
+
+
+class PressureInletOutletVelocity(FixedValue):
+    """PressureInletOutletVelocity."""
+
+    pass
+
+
+class AlphatJayatillekeWallFunction(FixedValue):
+    """alphatJayatillekeWallFunction."""
+
+    def __init__(self, value, isUniform=True, Prt=None):
+        """Init class."""
+        FixedValue.__init__(self, value, isUniform)
+        self.Prt = str(Prt) if Prt else '0.85'
+
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        _d = OrderedDict()
+        _d['type'] = self.type
+        _d['value'] = self.value
+        _d['Prt'] = self.Prt
+        return _d
+
+
+class FixedFluxPressure(FixedValue):
+    """FixedFluxPressure."""
+
+    def __init__(self, value, isUniform=True, rho=None):
+        """Init class."""
+        FixedValue.__init__(self, value, isUniform)
+        self.rho = rho if rho else 'rhok'
+
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        _d = OrderedDict()
+        _d['type'] = self.type
+        _d['value'] = self.value
+        _d['rho'] = self.rho
+        return _d
+
+
+class FlowRateInletVelocity(FixedValue):
+    """FlowRateInletVelocity."""
+
+    def __init__(self, volumetricFlowRate, value, isUniform=True):
+        """Init class."""
+        FixedValue.__init__(self, value, isUniform)
+        self.volumetricFlowRate = volumetricFlowRate
+
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        _d = OrderedDict()
+        _d['type'] = self.type
+        _d['volumetricFlowRate'] = self.volumetricFlowRate
+        _d['value'] = self.value
+        return _d
+
+
+class WallFunction(FixedValue):
+    """WallFunction."""
+
+    pass
+
+
+class KqRWallFunction(WallFunction):
+    """KqRWallFunction."""
+
+    pass
+
+
+class EpsilonWallFunction(WallFunction):
+    """EpsilonWallFunction.
+
+    Args:
+        value:
+        Cmu: (default: None)
+        kappa: (default: None)
+        E: (default: None)
+    """
+
+    # default values in OpenFOAM Cmu=0.09, kappa=0.41, E=9.8
+    def __init__(self, value, Cmu=None, kappa=None, E=None, isUnifrom=True):
+        """Init EpsilonWallFunction."""
+        WallFunction.__init__(self, value, isUnifrom)
+        self.cmu = Cmu
+        self.kappa = kappa
+        self.e = E
+
+    @property
+    def valueDict(self):
+        """Get fields as a dictionary."""
+        _d = OrderedDict()
+        _d['type'] = str(self.type)
+        _d['value'] = str(self.value)
+        if self.cmu:
+            _d['Cmu'] = str(self.cmu)
+        if self.kappa:
+            _d['kappa'] = str(self.kappa)
+        if self.e:
+            _d['E'] = str(self.e)
+
+        return _d
+
+
+class NutkWallFunction(EpsilonWallFunction):
+    """NutkWallFunction."""
+
+    pass
